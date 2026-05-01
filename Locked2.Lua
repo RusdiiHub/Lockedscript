@@ -3,20 +3,7 @@
 --  Game-Locked Script — Only runs inside Locked:2
 -- ============================================================
 
--- ==================== GAME DETECTION ====================
-local LOCKED2_PLACE_ID = 109883052223750
 
-if game.PlaceId ~= LOCKED2_PLACE_ID then
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "Giannis Client",
-            Text = "⚠️ No script for this game!\nThis script only works in Locked:2.",
-            Duration = 8
-        })
-    end)
-    warn("[Giannis Client] Wrong game detected (PlaceId: " .. tostring(game.PlaceId) .. "). Script stopped.")
-    return
-end
 
 -- ==================== CORRECT GAME — LOADING ====================
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
