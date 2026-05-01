@@ -1,11 +1,9 @@
 -- ============================================================
 --  Giannis Client | Locked:2
---  Game-Locked Script — Only runs inside Locked:2
 -- ============================================================
-
-
-
--- ==================== CORRECT GAME — LOADING ====================
+--  Giannis Client | Locked:2
+--  Universal Script — Works in any game
+-- ============================================================
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 -- ==================== SERVICES ====================
@@ -26,10 +24,9 @@ local LocalPlayer = Players.LocalPlayer
 getgenv().GiannisClient = getgenv().GiannisClient or {}
 local State = getgenv().GiannisClient
 State.Aimbot          = State.Aimbot or false
-State.AimbotFOV       = State.AimbotFOV or 120
+State.AimbotFOV       = State.AimbotFOV or 200
 State.AimbotSmooth    = State.AimbotSmooth or 5
 State.ShowFOV         = State.ShowFOV or false
-State.AimPart         = State.AimPart or "HumanoidRootPart"
 State.AutoShoot       = State.AutoShoot or false
 State.BallESP         = State.BallESP or false
 State.PlayerESP       = State.PlayerESP or false
@@ -38,6 +35,7 @@ State.SpeedBoost      = State.SpeedBoost or false
 State.InfStamina      = State.InfStamina or false
 State.AutoFlow        = State.AutoFlow or false
 State.SpinBot         = State.SpinBot or false
+State.BallTrajectory  = State.BallTrajectory or false
 
 -- ==================== HELPERS ====================
 local function getCharacter()
@@ -70,46 +68,6 @@ RunService.RenderStepped:Connect(function()
     fovCircle.Visible = State.ShowFOV and State.Aimbot
 end)
 
--- ==================== AIMBOT CORE ====================
-local function getClosestPlayerToMouse()
-    local closest = nil
-    local shortestDist = State.AimbotFOV
-    local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local char = player.Character
-            local aimPart = char:FindFirstChild(State.AimPart) or char:FindFirstChild("HumanoidRootPart")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-
-            if aimPart and hum and hum.Health > 0 then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(aimPart.Position)
-                if onScreen then
-                    local screenVec = Vector2.new(screenPos.X, screenPos.Y)
-                    local dist = (screenVec - centerScreen).Magnitude
-                    if dist < shortestDist then
-                        shortestDist = dist
-                        closest = aimPart
-                    end
-                end
-            end
-        end
-    end
-    return closest
-end
-
--- Aimbot loop
-RunService.RenderStepped:Connect(function()
-    if not State.Aimbot then return end
-
-    local target = getClosestPlayerToMouse()
-    if target then
-        local goalCF = CFrame.new(Camera.CFrame.Position, target.Position)
-        local smooth = math.clamp(State.AimbotSmooth, 1, 20)
-        Camera.CFrame = Camera.CFrame:Lerp(goalCF, 1 / smooth)
-    end
-end)
-
 -- ==================== BALL FINDER ====================
 local function findBall()
     for _, v in pairs(Workspace:GetDescendants()) do
@@ -118,7 +76,6 @@ local function findBall()
             return v
         end
     end
-    -- Also check for models
     for _, v in pairs(Workspace:GetDescendants()) do
         if v:IsA("Model") and string.find(string.lower(v.Name), "ball") then
             return v:FindFirstChildWhichIsA("BasePart")
@@ -126,6 +83,172 @@ local function findBall()
     end
     return nil
 end
+
+-- ==================== GOAL FINDER ====================
+local function findGoals()
+    local goals = {}
+    for _, v in pairs(Workspace:GetDescendants()) do
+        local nameL = string.lower(v.Name)
+        if (string.find(nameL, "goal") or string.find(nameL, "net") or string.find(nameL, "post")) then
+            if v:IsA("BasePart") then
+                table.insert(goals, v)
+            elseif v:IsA("Model") then
+                local part = v:FindFirstChildWhichIsA("BasePart")
+                if part then table.insert(goals, part) end
+            end
+        end
+    end
+    return goals
+end
+
+-- Find the goal that is NOT behind us (the opponent's goal)
+local function findOpponentGoal()
+    local hrp = getHRP()
+    if not hrp then return nil end
+    local goals = findGoals()
+    if #goals == 0 then return nil end
+
+    -- Pick the goal furthest from our spawn / closest to where we're facing
+    local bestGoal = nil
+    local bestScore = -math.huge
+    for _, goalPart in pairs(goals) do
+        -- Score = how much the goal is in front of us (dot product with look vector)
+        local toGoal = (goalPart.Position - hrp.Position).Unit
+        local lookDir = hrp.CFrame.LookVector
+        local dot = toGoal:Dot(lookDir)
+        -- Also factor in distance — prefer the one further away (opponent's side)
+        local dist = (hrp.Position - goalPart.Position).Magnitude
+        local score = dot + (dist / 1000) -- slight bias for farther goal
+        if score > bestScore then
+            bestScore = score
+            bestGoal = goalPart
+        end
+    end
+    return bestGoal
+end
+
+-- ==================== GOAL AIMBOT CORE ====================
+RunService.RenderStepped:Connect(function()
+    if not State.Aimbot then return end
+    local goal = findOpponentGoal()
+    if goal then
+        -- Aim at the center of the goal
+        local targetPos = goal.Position
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
+        if onScreen then
+            local centerScreen = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            local screenVec = Vector2.new(screenPos.X, screenPos.Y)
+            local dist = (screenVec - centerScreen).Magnitude
+            -- Only aim if within FOV
+            if dist < State.AimbotFOV then
+                local goalCF = CFrame.new(Camera.CFrame.Position, targetPos)
+                local smooth = math.clamp(State.AimbotSmooth, 1, 20)
+                Camera.CFrame = Camera.CFrame:Lerp(goalCF, 1 / smooth)
+            end
+        end
+    end
+end)
+
+-- ==================== BALL TRAJECTORY PREDICTION ====================
+-- Uses velocity-based physics to predict where the ball will be
+local GRAVITY = Vector3.new(0, -Workspace.Gravity, 0)
+local trajectoryLine = Drawing.new("Line")
+trajectoryLine.Thickness = 2
+trajectoryLine.Color = Color3.fromRGB(0, 255, 200)
+trajectoryLine.Transparency = 0.4
+trajectoryLine.Visible = false
+
+local trajectoryEnd = Drawing.new("Circle")
+trajectoryEnd.Thickness = 2
+trajectoryEnd.NumSides = 24
+trajectoryEnd.Radius = 8
+trajectoryEnd.Filled = true
+trajectoryEnd.Color = Color3.fromRGB(0, 255, 200)
+trajectoryEnd.Transparency = 0.5
+trajectoryEnd.Visible = false
+
+-- Store previous ball position/time for velocity calculation
+local prevBallPos = nil
+local prevBallTime = 0
+
+local function predictBallTrajectory(ball, steps, dt)
+    -- Calculate ball velocity from position delta if .Velocity not available
+    local velocity = Vector3.new(0, 0, 0)
+    pcall(function()
+        if ball.Velocity then
+            velocity = ball.Velocity
+        end
+    end)
+
+    -- Fallback: estimate velocity from position change
+    local now = tick()
+    if velocity.Magnitude < 0.1 and prevBallPos then
+        local elapsed = now - prevBallTime
+        if elapsed > 0 and elapsed < 1 then
+            velocity = (ball.Position - prevBallPos) / elapsed
+        end
+    end
+    prevBallPos = ball.Position
+    prevBallTime = now
+
+    -- Predict future positions using kinematic equations
+    -- pos(t) = pos0 + vel*t + 0.5*gravity*t^2
+    local positions = {}
+    local pos = ball.Position
+    local vel = velocity
+    for i = 1, steps do
+        local t = i * dt
+        local futurePos = ball.Position + vel * t + 0.5 * GRAVITY * t * t
+        -- Clamp to ground level (don't go below terrain)
+        if futurePos.Y < 0.5 then
+            futurePos = Vector3.new(futurePos.X, 0.5, futurePos.Z)
+        end
+        table.insert(positions, futurePos)
+    end
+    return positions, velocity
+end
+
+-- Trajectory rendering loop
+RunService.RenderStepped:Connect(function()
+    if not State.BallTrajectory then
+        trajectoryLine.Visible = false
+        trajectoryEnd.Visible = false
+        return
+    end
+
+    local ball = findBall()
+    if not ball then
+        trajectoryLine.Visible = false
+        trajectoryEnd.Visible = false
+        return
+    end
+
+    local positions, velocity = predictBallTrajectory(ball, 20, 0.1) -- 2 seconds ahead
+
+    -- Only show if ball is moving
+    if velocity.Magnitude < 1 then
+        trajectoryLine.Visible = false
+        trajectoryEnd.Visible = false
+        return
+    end
+
+    -- Draw line from ball to predicted landing
+    local ballScreen, ballOnScreen = Camera:WorldToViewportPoint(ball.Position)
+    local endPos = positions[#positions]
+    local endScreen, endOnScreen = Camera:WorldToViewportPoint(endPos)
+
+    if ballOnScreen and endOnScreen then
+        trajectoryLine.From = Vector2.new(ballScreen.X, ballScreen.Y)
+        trajectoryLine.To = Vector2.new(endScreen.X, endScreen.Y)
+        trajectoryLine.Visible = true
+
+        trajectoryEnd.Position = Vector2.new(endScreen.X, endScreen.Y)
+        trajectoryEnd.Visible = true
+    else
+        trajectoryLine.Visible = false
+        trajectoryEnd.Visible = false
+    end
+end)
 
 -- ==================== ESP SYSTEM ====================
 local espObjects = {}
@@ -209,16 +332,16 @@ local MiscTab   = Window:Tab({ Title = "Misc",     Icon = "settings" })
 -- ============================================================
 --                      AIMBOT TAB (⭐ MAIN FEATURE)
 -- ============================================================
-AimbotTab:Section({ Title = "⚽ Aimbot Settings" })
+AimbotTab:Section({ Title = "🥅 Goal Aimbot" })
 
 AimbotTab:Toggle({
-    Title = "Enable Aimbot",
-    Desc = "Locks your camera onto the nearest player in FOV",
+    Title = "Goal Aimbot",
+    Desc = "Locks your camera onto the opponent's goal net",
     Callback = function(state)
         State.Aimbot = state
         WindUI:Notify({
-            Title = "Aimbot",
-            Content = state and "Aimbot ENABLED — locking on!" or "Aimbot disabled.",
+            Title = "Goal Aimbot",
+            Content = state and "Aiming at the goal! 🥅" or "Goal aimbot disabled.",
             Duration = 3
         })
     end
@@ -234,10 +357,10 @@ AimbotTab:Toggle({
 
 AimbotTab:Slider({
     Title = "FOV Radius",
-    Desc = "How wide the aimbot scans for targets",
-    Default = 120,
-    Min = 30,
-    Max = 500,
+    Desc = "How wide the aimbot scans for the goal",
+    Default = 200,
+    Min = 50,
+    Max = 800,
     Callback = function(value)
         State.AimbotFOV = value
     end
@@ -254,36 +377,18 @@ AimbotTab:Slider({
     end
 })
 
-AimbotTab:Dropdown({
-    Title = "Aim Part",
-    Desc = "Which body part to aim at",
-    Values = {"HumanoidRootPart", "Head", "UpperTorso", "LowerTorso"},
-    Value = "HumanoidRootPart",
-    Callback = function(value)
-        State.AimPart = value
-    end
-})
-
-AimbotTab:Section({ Title = "⚽ Ball Aimbot" })
+AimbotTab:Section({ Title = "⚽ Ball Trajectory" })
 
 AimbotTab:Toggle({
-    Title = "Ball Aim Assist",
-    Desc = "Aims your camera towards the ball when shooting",
+    Title = "Ball Trajectory Prediction",
+    Desc = "Shows a line predicting where the ball will go (physics-based)",
     Callback = function(state)
-        State.BallAim = state
-        if state then
-            task.spawn(function()
-                while State.BallAim do
-                    task.wait(0.05)
-                    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then continue end
-                    local ball = findBall()
-                    if ball then
-                        local goalCF = CFrame.new(Camera.CFrame.Position, ball.Position)
-                        Camera.CFrame = Camera.CFrame:Lerp(goalCF, 0.15)
-                    end
-                end
-            end)
-        end
+        State.BallTrajectory = state
+        WindUI:Notify({
+            Title = "Trajectory",
+            Content = state and "Ball path prediction ON! 📐" or "Prediction OFF.",
+            Duration = 3
+        })
     end
 })
 
